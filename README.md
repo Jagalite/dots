@@ -20,7 +20,7 @@ pkg-config --modversion alsa
 # Run the consuming project's normal build command in this shell.
 ```
 
-Use a fresh shell or subshell to scope these environment variables. `env.sh` supplies the isolated pkg-config search path, include/library prefix, and runtime library path. This bundle targets Debian 13 amd64 and a compatible host toolchain/glibc; it is not a cross-compiler or a complete OS sysroot. It does not install packages globally, configure audio, or prove physical audio playback. Other dependencies still come from the consuming build environment.
+Use a fresh shell or subshell to scope these environment variables. `env.sh` prepends the ALSA pkg-config and library paths while preserving discovery of other host packages. Only `alsa.pc` is adjusted to use a relocatable prefix; its original Debian contents remain in `metadata/alsa.pc.debian-original`. Start in a native-build shell without `PKG_CONFIG_SYSROOT_DIR`. This bundle targets Debian 13 amd64 and a compatible host toolchain/glibc; it is not a cross-compiler or a complete OS sysroot. It does not install packages globally, configure audio, or prove physical audio playback. Other dependencies still come from the consuming build environment.
 
 Artifacts are retained for 30 days. Rerun the workflow for a fresh bundle if they expire. Each run intentionally resolves the current trixie package candidate and records the result, rather than claiming byte-identical output across repository updates.
 

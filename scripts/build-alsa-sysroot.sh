@@ -40,6 +40,15 @@ for package in "${packages[@]}"; do
     >> "$bundle/metadata/packages.tsv"
 done
 
+# Keep the original package metadata and make only ALSA's paths relocatable.
+# This avoids globally sysrooting or hiding unrelated host pkg-config packages.
+pc="$bundle/sysroot/usr/lib/x86_64-linux-gnu/pkgconfig/alsa.pc"
+cp "$pc" "$bundle/metadata/alsa.pc.debian-original"
+sed -i \
+  -e 's|^prefix=/usr$|prefix=${pcfiledir}/../../..|' \
+  -e 's|^exec_prefix=/usr$|exec_prefix=${prefix}|' "$pc"
+grep -Fx 'prefix=${pcfiledir}/../../..' "$pc"
+
 cp /etc/os-release "$bundle/metadata/os-release"
 cp -a /etc/apt/sources.list.d "$bundle/metadata/apt-sources.list.d"
 if [[ -f /etc/apt/sources.list ]]; then
@@ -65,10 +74,11 @@ cat > "$bundle/env.sh" <<'ENV'
 # Source this file from Bash in a subshell to scope the dependency environment.
 _alsa_bundle="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 export ALSA_SYSROOT="$_alsa_bundle/sysroot"
-export PKG_CONFIG_SYSROOT_DIR="$ALSA_SYSROOT"
-export PKG_CONFIG_LIBDIR="$ALSA_SYSROOT/usr/lib/x86_64-linux-gnu/pkgconfig"
-# Ignore unrelated pkg-config metadata so host ALSA cannot silently pass the test.
-export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
+if [[ -n "${PKG_CONFIG_SYSROOT_DIR:-}" && "${PKG_CONFIG_SYSROOT_DIR}" != "/" ]]; then
+  printf '%s\n' 'Use this native ALSA bundle in a shell without PKG_CONFIG_SYSROOT_DIR.' >&2
+  return 1
+fi
+export PKG_CONFIG_PATH="$ALSA_SYSROOT/usr/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 export LIBRARY_PATH="$ALSA_SYSROOT/usr/lib/x86_64-linux-gnu${LIBRARY_PATH:+:$LIBRARY_PATH}"
 export LD_LIBRARY_PATH="$ALSA_SYSROOT/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 unset _alsa_bundle
@@ -89,9 +99,18 @@ C
 testroot="$(mktemp -d)"
 trap 'rm -rf -- "$testroot"' EXIT
 cp -a "$bundle" "$testroot/relocated"
+mkdir "$testroot/host-pkgconfig"
+cat > "$testroot/host-pkgconfig/host-probe.pc" <<'PC'
+prefix=/usr
+Name: host-probe
+Description: Test that non-ALSA pkg-config metadata stays visible and unchanged
+Version: 1.0
+PC
 (
+  export PKG_CONFIG_PATH="$testroot/host-pkgconfig"
   source "$testroot/relocated/env.sh"
-  [[ "$(pkg-config --variable=pcfiledir alsa)" == "$PKG_CONFIG_LIBDIR" ]]
+  [[ "$(pkg-config --variable=pcfiledir alsa)" == "$ALSA_SYSROOT/usr/lib/x86_64-linux-gnu/pkgconfig" ]]
+  [[ "$(pkg-config --variable=prefix host-probe)" == /usr ]]
   pkg-config --modversion alsa
   pkg-config --cflags --libs alsa
   read -r -a cflags <<< "$(pkg-config --cflags alsa)"
